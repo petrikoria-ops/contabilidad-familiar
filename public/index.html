@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contabilidad Familiar</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- Login overlay -->
+  <div id="login-overlay" class="overlay">
+    <div class="login-card">
+      <div class="login-icon">💰</div>
+      <h2>Contabilidad Familiar</h2>
+      <p>Ingresa tu número de WhatsApp para acceder a tu dashboard</p>
+      <div class="phone-input-group">
+        <span class="phone-prefix">whatsapp:+</span>
+        <input type="tel" id="phone-input" placeholder="56912345678" autocomplete="tel" />
+      </div>
+      <button id="login-btn" class="btn-primary">Entrar</button>
+      <p class="login-hint">El número debe coincidir con el usado en WhatsApp</p>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container"></div>
+
+  <!-- Main app -->
+  <div id="app" class="hidden">
+
+    <header class="app-header">
+      <div class="header-brand">
+        <span class="brand-icon">💰</span>
+        <h1>Contabilidad Familiar</h1>
+        <span id="user-phone-badge" class="phone-badge"></span>
+      </div>
+      <nav class="month-nav">
+        <button id="prev-month" class="btn-nav" title="Mes anterior">&#9664;</button>
+        <span id="current-month-label" class="month-label"></span>
+        <button id="next-month" class="btn-nav" title="Mes siguiente">&#9654;</button>
+      </nav>
+      <div class="header-actions">
+        <button id="refresh-btn" class="btn-icon" title="Actualizar">&#8635;</button>
+        <button id="logout-btn" class="btn-logout">Salir</button>
+      </div>
+    </header>
+
+    <main class="app-main">
+
+      <!-- Section 1: Summary cards -->
+      <section class="summary-section">
+        <div class="card card-income">
+          <div class="card-icon-wrap">💚</div>
+          <div class="card-body">
+            <div class="card-label">Ingresos</div>
+            <div class="card-value" id="total-ingresos">$0</div>
+          </div>
+        </div>
+        <div class="card card-expense">
+          <div class="card-icon-wrap">❤️</div>
+          <div class="card-body">
+            <div class="card-label">Gastos</div>
+            <div class="card-value" id="total-gastos">$0</div>
+          </div>
+        </div>
+        <div class="card card-balance">
+          <div class="card-icon-wrap">💰</div>
+          <div class="card-body">
+            <div class="card-label">Balance</div>
+            <div class="card-value" id="total-balance">$0</div>
+          </div>
+        </div>
+        <div class="card card-budget">
+          <div class="card-icon-wrap">📊</div>
+          <div class="card-body">
+            <div class="card-label">% Presupuesto</div>
+            <div class="card-value" id="budget-pct">—</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Budget vs Real -->
+      <section class="panel">
+        <div class="panel-header">
+          <h2>📋 Presupuesto vs Real</h2>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table" id="budget-table">
+            <thead>
+              <tr>
+                <th>Categoría</th>
+                <th class="num">Presupuestado</th>
+                <th class="num">Gastado</th>
+                <th class="num">Diferencia</th>
+                <th class="num">% Usado</th>
+              </tr>
+            </thead>
+            <tbody id="budget-tbody">
+              <tr><td colspan="5" class="empty-row">Sin presupuestos configurados</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section 3: Transactions -->
+      <section class="panel">
+        <div class="panel-header">
+          <h2>📝 Transacciones del mes</h2>
+          <button id="add-transaction-btn" class="btn-primary btn-sm">+ Agregar</button>
+        </div>
+        <div class="filters-bar">
+          <select id="filter-type" class="filter-select">
+            <option value="">Todos</option>
+            <option value="ingreso">Ingresos</option>
+            <option value="gasto">Gastos</option>
+          </select>
+          <select id="filter-category" class="filter-select">
+            <option value="">Todas las categorías</option>
+          </select>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table" id="transactions-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Descripción</th>
+                <th class="num">Monto</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="transactions-tbody">
+              <tr><td colspan="4" class="empty-row">Sin transacciones este mes</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section 4: Budget configuration -->
+      <section class="panel">
+        <div class="panel-header">
+          <h2>⚙️ Configurar Presupuestos</h2>
+          <span class="panel-hint">Se notifica por WhatsApp al guardar</span>
+        </div>
+        <div id="budget-form-grid" class="budget-grid"></div>
+        <div class="panel-footer">
+          <button id="save-budgets-btn" class="btn-primary">💾 Guardar Presupuestos</button>
+        </div>
+      </section>
+
+      <!-- Section 5: Charts -->
+      <section class="charts-section">
+        <div class="chart-panel">
+          <h2>🍩 Gastos por Categoría</h2>
+          <div class="chart-wrap">
+            <canvas id="donut-chart"></canvas>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <h2>📈 Evolución 6 Meses</h2>
+          <div class="chart-wrap">
+            <canvas id="line-chart"></canvas>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Edit modal -->
+  <div id="edit-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>✏️ Editar Transacción</h3>
+      <input type="hidden" id="edit-id" />
+      <div class="form-group">
+        <label>Descripción</label>
+        <input type="text" id="edit-description" class="form-input" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Monto (CLP)</label>
+          <input type="number" id="edit-amount" class="form-input" min="1" />
+        </div>
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="edit-type" class="form-input">
+            <option value="gasto">Gasto</option>
+            <option value="ingreso">Ingreso</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Categoría</label>
+          <select id="edit-category" class="form-input"></select>
+        </div>
+        <div class="form-group">
+          <label>Fecha</label>
+          <input type="date" id="edit-date" class="form-input" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="edit-cancel-btn" class="btn-secondary">Cancelar</button>
+        <button id="edit-save-btn" class="btn-primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add modal -->
+  <div id="add-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>➕ Nueva Transacción</h3>
+      <div class="form-group">
+        <label>Descripción</label>
+        <input type="text" id="add-description" class="form-input" placeholder="ej. Almuerzo" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Monto (CLP)</label>
+          <input type="number" id="add-amount" class="form-input" min="1" placeholder="5000" />
+        </div>
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="add-type" class="form-input">
+            <option value="gasto">Gasto</option>
+            <option value="ingreso">Ingreso</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Categoría</label>
+          <select id="add-category" class="form-input"></select>
+        </div>
+        <div class="form-group">
+          <label>Fecha</label>
+          <input type="date" id="add-date" class="form-input" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="add-cancel-btn" class="btn-secondary">Cancelar</button>
+        <button id="add-save-btn" class="btn-primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

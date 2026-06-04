@@ -1,0 +1,140 @@
+Crea una aplicación completa de contabilidad familiar con WhatsApp como canal principal de entrada.
+
+## STACK
+- Backend: Node.js + Express
+- WhatsApp: Twilio WhatsApp Sandbox (webhook)
+- Base de datos: Supabase (PostgreSQL) con cliente JS
+- IA clasificadora: Google Gemini API (gemini-1.5-flash, FREE tier)
+- Frontend: HTML/CSS/JS vanilla (sin frameworks)
+- Deploy: preparado para Railway (backend) + servir frontend estático desde Railway
+
+## FUNCIONALIDADES CORE
+
+### 1. Bot WhatsApp (webhook /webhook POST)
+El usuario envía mensajes como:
+- "pagué 45000 de supermercado"
+- "recibí sueldo 1.200.000"
+- "gasté 15000 en bencina"
+- "resumen junio"
+- "presupuesto"
+- "ayuda"
+
+Gemini API (gemini-1.5-flash) clasifica automáticamente cada mensaje y extrae en JSON:
+- tipo: ingreso | gasto
+- monto: número en CLP
+- categoría: una de [vivienda, alimentación, transporte, salud, educación, entretenimiento, ropa, servicios_basicos, ahorro, ingreso_laboral, ingreso_extra, otro]
+- descripción: texto limpio
+- fecha: fecha actual si no se especifica otra
+- es_comando: true si es resumen/presupuesto/historial/ayuda/borrar/editar
+
+Usar @google/generative-ai SDK. El prompt a Gemini debe pedir respuesta SOLO en JSON válido sin markdown.
+
+Comandos especiales:
+- "resumen" o "resumen [mes]" → resumen del mes con totales por categoría
+- "presupuesto" → comparativa presupuesto vs real del mes actual
+- "historial" → últimas 10 transacciones
+- "ayuda" → lista de comandos disponibles
+- "borrar último" → elimina última transacción y confirma
+- "editar [descripción]" → Gemini interpreta y aplica el cambio
+
+### 2. Base de datos Supabase
+Tablas:
+
+transactions:
+- id (uuid PK)
+- user_phone (text)
+- type (text) — ingreso | gasto
+- amount (integer) — CLP
+- category (text)
+- description (text)
+- transaction_date (date)
+- created_at (timestamp)
+- month_year (text) — formato "2026-06"
+
+budgets:
+- id (uuid PK)
+- user_phone (text)
+- category (text)
+- monthly_limit (integer)
+- month_year (text)
+
+Generar SQL completo para ambas tablas.
+
+### 3. Frontend web (dashboard) servido como estático desde Railway
+/public/index.html con:
+
+HEADER: "Contabilidad Familiar" + mes actual + nav prev/next mes
+
+SECCIÓN 1 — Resumen ejecutivo:
+- Card total ingresos
+- Card total gastos
+- Card balance
+- Card % presupuesto usado
+
+SECCIÓN 2 — Presupuesto vs Real (tabla):
+Categoría | Presupuestado | Gastado | Diferencia | % usado
+Colores: verde <80%, amarillo 80-100%, rojo >100%
+
+SECCIÓN 3 — Transacciones del mes:
+Lista cronológica: fecha | emoji categoría | descripción | monto
+Filtros por categoría y tipo
+Botón editar y eliminar por fila
+
+SECCIÓN 4 — Configurar presupuestos:
+Formulario por categoría → al guardar notifica WhatsApp
+
+SECCIÓN 5 — Gráficos con Chart.js CDN:
+- Donut: gastos por categoría
+- Line: evolución últimos 6 meses
+
+DISEÑO: oscuro, moderno, verde/rojo para positivo/negativo, mobile-friendly.
+
+### 4. API REST
+- GET /api/transactions?phone=&month=
+- POST /api/transactions
+- PUT /api/transactions/:id
+- DELETE /api/transactions/:id (notifica WhatsApp)
+- GET /api/budgets?phone=&month=
+- POST /api/budgets (notifica WhatsApp)
+- GET /api/summary?phone=&month=
+
+### 5. Notificaciones WhatsApp salientes desde frontend
+- "✏️ Transacción editada: [desc] → $[X]"
+- "🗑️ Transacción eliminada: [desc] $[X]"
+- "📊 Presupuesto actualizado: [cat] → $[X]/mes"
+
+### 6. Variables de entorno (.env)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+GEMINI_API_KEY=
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+USER_PHONE=whatsapp:+569XXXXXXXX
+PORT=3000
+
+## ESTRUCTURA
+/
+├── server.js
+├── routes/
+│   ├── webhook.js
+│   └── api.js
+├── services/
+│   ├── gemini.js
+│   ├── supabase.js
+│   └── twilio.js
+├── public/
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── .env.example
+└── package.json
+
+## CONSIDERACIONES
+- Errores async manejados en todas las funciones
+- Si Gemini falla, responder WhatsApp con mensaje amigable
+- Montos en CLP con formato 1.200.000
+- Zona horaria: America/Santiago
+- Múltiples usuarios por número de teléfono
+- Frontend consume la misma API REST del backend
+- Express sirve /public como estático con express.static
