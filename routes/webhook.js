@@ -1,204 +1,170 @@
-const express = require('express');
-const router = express.Router();
-const { classifyMessage } = require('../services/gemini');
-const {
-  createTransaction,
-  getTransactions,
-  getLastTransaction,
-  deleteTransaction,
-  getBudgets
-} = require('../services/supabase');
-
-const CATEGORY_EMOJIS = {
-  vivienda: '🏠', alimentación: '🛒', transporte: '🚗',
-  salud: '💊', educación: '📚', entretenimiento: '🎬',
-  ropa: '👕', servicios_basicos: '💡', ahorro: '💰',
-  ingreso_laboral: '💼', ingreso_extra: '💵', otro: '📦'
+const CATEGORY_KEYWORDS = {
+  alimentacion: ['supermercado','jumbo','lider','unimarc','santa isabel','walmart','tottus','acuenta','mayorista','almacen','feria','verduleria','carniceria','panaderia','pasteleria','rotiseria','comida','restaurant','restaurante','cafe','cafeteria','mcdonald','burger king','pizza','sushi','delivery','rappi','pedidosya','uber eats','ifood','sandwich','empanada','almuerzo','once','desayuno','cena','mercado'],
+  transporte: ['bencina','combustible','gasolina','copec','shell','esso','petrobras','bp','uber','cabify','didi','beat','metro','bus','micro','taxi','taxibus','estacionamiento','parquimetro','peaje','autobus','pasaje','locomocion','tag','autopista','movil','transfer'],
+  servicios_basicos: ['luz','electricidad','agua','gas','internet','telefono','celular','movil','plan','movistar','entel','claro','wom','vtr','cge','enel','metrogas','essal','aguas andinas','essbio','chilectra','frontel','arriendo web','hosting','dominio'],
+  vivienda: ['arriendo','renta','dividendo','hipoteca','condominio','gastos comunes','administracion','cuota edificio','mantención','reparacion','plomero','gasfiter','electricista','pintura','mueble','ikea','sodimac','homecenter','easy'],
+  salud: ['farmacia','medicamento','remedio','medico','doctor','clinica','hospital','consulta','examen','dentista','optica','lente','cruz verde','salcobrand','ahumada','isapre','fonasa','copago','bono','urgencia','enfermedad','vacuna','fisioterapeuta','kinesiologo','psicologo','psiquiatra'],
+  educacion: ['colegio','universidad','instituto','curso','libro','cuaderno','lapiz','matricula','mensualidad','academia','taller','capacitacion','certificacion','udemy','coursera','jardin','kinder','preescolar','guarderia'],
+  entretenimiento: ['cine','cinema','netflix','spotify','hbo','disney','amazon prime','youtube premium','juego','videojuego','steam','playstation','xbox','deporte','gimnasio','gym','natacion','futbol','tenis','teatro','concierto','evento','entrada','bar','discoteca','disco','karaoke','bowling','paseo','excursion','turismo','hotel','airbnb'],
+  ropa: ['ropa','vestimenta','zapato','zapatilla','tenis','polera','pantalon','falda','vestido','camisa','chaqueta','abrigo','calcetines','ropa interior','falabella','ripley','paris','h&m','zara','forever21','calzado','moda'],
+  ahorro: ['ahorro','ahorré','inversión','inversion','deposito','fondo','afp','cuenta ahorro','plazo fijo','acciones','cripto','bitcoin'],
+  ingreso_laboral: ['sueldo','salario','remuneracion','liquidacion','pago quincena','honorario','boleta','factura cobrada','me pagaron','pago trabajo','recibí pago'],
+  ingreso_extra: ['venta','vendí','vendi','freelance','extra','bono','aguinaldo','devolucion','reembolso','transferencia recibida','regalo','prestamo recibido','dividendo recibido'],
 };
 
-function formatCLP(amount) {
-  return `$${amount.toLocaleString('es-CL')}`;
-}
+const INGRESO_TRIGGERS = ['recibí','recibi','cobré','cobre','me pagaron','gané','gane','vendí','vendi','ingresó','ingreso','depositaron','transferencia recibida','llegó pago','llego pago','sueldo','salario','honorario'];
+const GASTO_TRIGGERS = ['pagué','pague','gasté','gaste','compré','compre','fui a','comí','comi','tomé','tome','saqué','saque','transferí','transferi','mandé','mande','envié','envie','cancelé','cancele','abonée','abone','pagamos'];
 
-function getCurrentDate() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
-}
+const MESES = { enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,octubre:10,noviembre:11,diciembre:12 };
 
-function getCurrentMonthYear() {
-  return getCurrentDate().substring(0, 7);
-}
+const COMANDOS_MAP = {
+  'resumen': 'resumen', 'summary': 'resumen',
+  'presupuesto': 'presupuesto', 'budget': 'presupuesto',
+  'historial': 'historial', 'historia': 'historial', 'movimientos': 'historial',
+  'ayuda': 'ayuda', 'help': 'ayuda', 'comandos': 'ayuda',
+  'borrar': 'borrar', 'eliminar': 'borrar', 'borrar último': 'borrar', 'borrar ultimo': 'borrar',
+};
 
-function escapeXml(text) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function twimlReply(res, message) {
-  res.set('Content-Type', 'text/xml');
-  res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(message)}</Message></Response>`);
-}
-
-router.post('/', async (req, res) => {
-  const from = req.body.From;
-  const body = req.body.Body?.trim();
-
-  if (!from || !body) {
-    return res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+function detectarCategoria(texto) {
+  const t = texto.toLowerCase();
+  for (const [cat, palabras] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (palabras.some(p => t.includes(p))) return cat;
   }
+  return null;
+}
 
-  let reply = '';
-
-  try {
-    const classified = await classifyMessage(body, getCurrentDate());
-
-    if (classified.es_comando) {
-      const monthYear = classified.mes_consulta || getCurrentMonthYear();
-      switch (classified.comando) {
-        case 'resumen':    reply = await handleResumen(from, monthYear); break;
-        case 'presupuesto': reply = await handlePresupuesto(from, monthYear); break;
-        case 'historial':  reply = await handleHistorial(from); break;
-        case 'ayuda':      reply = getAyuda(); break;
-        case 'borrar':     reply = await handleBorrar(from); break;
-        default:           reply = '❓ Comando no reconocido. Escribe *ayuda* para ver las opciones.';
-      }
-    } else if (classified.tipo && classified.monto) {
-      const fecha = classified.fecha || getCurrentDate();
-      const monthYear = fecha.substring(0, 7);
-
-      const transaction = await createTransaction({
-        user_phone: from,
-        type: classified.tipo,
-        amount: classified.monto,
-        category: classified.categoria || 'otro',
-        description: classified.descripcion || body,
-        transaction_date: fecha,
-        month_year: monthYear
-      });
-
-      const emoji = classified.tipo === 'ingreso' ? '💚' : '❤️';
-      const catEmoji = CATEGORY_EMOJIS[classified.categoria] || '📦';
-      reply = `${emoji} *${classified.tipo === 'ingreso' ? 'Ingreso' : 'Gasto'} registrado*\n${catEmoji} ${transaction.description}\n💵 ${formatCLP(classified.monto)}\n📅 ${fecha}`;
-
-      if (classified.tipo === 'gasto') {
-        const [budgets, transactions] = await Promise.all([
-          getBudgets(from, monthYear),
-          getTransactions(from, monthYear)
-        ]);
-        const b = budgets.find(b => b.category === classified.categoria);
-        if (b) {
-          const spent = transactions
-            .filter(t => t.type === 'gasto' && t.category === classified.categoria)
-            .reduce((s, t) => s + t.amount, 0);
-          if (spent > b.monthly_limit) {
-            reply += `\n\n⚠️ *Presupuesto excedido* en ${classified.categoria} por ${formatCLP(spent - b.monthly_limit)}`;
-          } else if (spent / b.monthly_limit >= 0.8) {
-            reply += `\n\n⚠️ *Alerta:* llevas el ${Math.round(spent / b.monthly_limit * 100)}% del presupuesto de ${classified.categoria}`;
-          }
-        }
-      }
-    } else {
-      reply = '❓ No pude procesar tu mensaje. Intenta con: "pagué 5000 de almuerzo" o escribe *ayuda*.';
+function extraerMonto(texto) {
+  // Patrones: $1.200.000 | 1200000 | 1.200 | 1,200 | 1.2k | 1.2m
+  const patterns = [
+    /\$\s?(\d{1,3}(?:[.,]\d{3})+)/,   // $1.200.000 o $1,200,000
+    /(\d{1,3}(?:[.,]\d{3})+)/,         // 1.200.000
+    /(\d+(?:[.,]\d+)?)\s*k\b/i,        // 20k
+    /(\d+(?:[.,]\d+)?)\s*m(?:il)?\b/i, // 2mil o 2m
+    /\$\s?(\d+)/,                       // $5000
+    /(\d{4,})/,                         // 5000+
+    /(\d{1,3})/,                        // 500
+  ];
+  
+  for (const pat of patterns) {
+    const m = texto.match(pat);
+    if (m) {
+      let val = m[1].replace(/\./g, '').replace(',', '.');
+      if (pat.source.includes('k')) val = parseFloat(val) * 1000;
+      else if (pat.source.includes('m(?:il)')) val = parseFloat(val) * 1000;
+      else val = parseFloat(val);
+      if (val > 0) return Math.round(val);
     }
-  } catch (err) {
-    console.error('Webhook error:', err);
-    reply = '😔 Ocurrió un error al procesar tu mensaje. Por favor intenta de nuevo.';
+  }
+  return null;
+}
+
+function detectarTipo(texto, categoria) {
+  const t = texto.toLowerCase();
+  if (INGRESO_TRIGGERS.some(p => t.includes(p))) return 'ingreso';
+  if (GASTO_TRIGGERS.some(p => t.includes(p))) return 'gasto';
+  if (categoria && ['ingreso_laboral','ingreso_extra','ahorro'].includes(categoria)) return 'ingreso';
+  return 'gasto'; // default
+}
+
+function extraerFecha(texto) {
+  const t = texto.toLowerCase();
+  const hoy = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Santiago' }));
+  
+  if (t.includes('ayer')) {
+    hoy.setDate(hoy.getDate() - 1);
+    return hoy.toLocaleDateString('en-CA');
+  }
+  if (t.includes('antier') || t.includes('anteayer')) {
+    hoy.setDate(hoy.getDate() - 2);
+    return hoy.toLocaleDateString('en-CA');
+  }
+  
+  // "el 15" o "el día 15"
+  const diaMatch = t.match(/el\s+(?:d[ií]a\s+)?(\d{1,2})/);
+  if (diaMatch) {
+    const dia = parseInt(diaMatch[1]);
+    if (dia >= 1 && dia <= 31) {
+      return `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    }
+  }
+  
+  return hoy.toLocaleDateString('en-CA');
+}
+
+function extraerDescripcion(texto, monto, categoria) {
+  let desc = texto
+    .replace(/\$\s?\d{1,3}(?:[.,]\d{3})*/g, '')
+    .replace(/\d+(?:[.,]\d+)?\s*k\b/gi, '')
+    .replace(/\d{4,}/g, '')
+    .replace(/pagué|pague|gasté|gaste|compré|compre|recibi|recibí|cobré|cobre|me pagaron|gané|gane|vendí|vendi|ingresó|fui a/gi, '')
+    .replace(/ayer|hoy|antier|anteayer/gi, '')
+    .replace(/el\s+d[ií]a\s+\d{1,2}/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  
+  return desc || categoria || 'sin descripción';
+}
+
+function detectarComando(texto) {
+  const t = texto.toLowerCase().trim();
+  
+  // Exacto
+  if (COMANDOS_MAP[t]) return { comando: COMANDOS_MAP[t], mes_consulta: null };
+  
+  // Resumen con mes
+  const resumenMes = t.match(/resumen\s+(?:de\s+)?(\w+)/);
+  if (resumenMes) {
+    const mesNombre = resumenMes[1].toLowerCase();
+    const mesNum = MESES[mesNombre];
+    if (mesNum) {
+      const año = new Date().getFullYear();
+      const mesStr = `${año}-${String(mesNum).padStart(2,'0')}`;
+      return { comando: 'resumen', mes_consulta: mesStr };
+    }
+  }
+  
+  // Borrar variantes
+  if (t.includes('borrar') || t.includes('eliminar') || t.includes('borra el último') || t.includes('quita el ultimo')) {
+    return { comando: 'borrar', mes_consulta: null };
+  }
+  
+  // Comandos que empiezan con keyword
+  for (const [key, cmd] of Object.entries(COMANDOS_MAP)) {
+    if (t.startsWith(key)) return { comando: cmd, mes_consulta: null };
+  }
+  
+  return null;
+}
+
+async function classifyMessage(mensaje, fechaActual) {
+  const texto = mensaje.trim();
+  const t = texto.toLowerCase();
+
+  // 1. Detectar comando
+  const cmd = detectarComando(t);
+  if (cmd) return { es_comando: true, ...cmd, texto_original: texto };
+
+  // 2. Extraer monto
+  const monto = extraerMonto(texto);
+  if (!monto || monto <= 0) {
+    // Sin monto — puede ser comando no reconocido o texto libre
+    return { es_comando: true, comando: 'no_entendido', texto_original: texto };
   }
 
-  twimlReply(res, reply);
-});
+  // 3. Clasificar
+  const categoria = detectarCategoria(texto) || 'otro';
+  const tipo = detectarTipo(texto, categoria);
+  const fecha = extraerFecha(texto);
+  const descripcion = extraerDescripcion(texto, monto, categoria);
 
-async function handleResumen(phone, monthYear) {
-  const transactions = await getTransactions(phone, monthYear);
-  if (transactions.length === 0) return `📊 Sin transacciones para ${monthYear}.`;
-
-  const ingresos = transactions.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0);
-  const gastos = transactions.filter(t => t.type === 'gasto').reduce((s, t) => s + t.amount, 0);
-  const balance = ingresos - gastos;
-
-  const gastosCat = {};
-  transactions.filter(t => t.type === 'gasto').forEach(t => {
-    gastosCat[t.category] = (gastosCat[t.category] || 0) + t.amount;
-  });
-
-  let msg = `📊 *Resumen ${monthYear}*\n\n`;
-  msg += `💚 Ingresos: ${formatCLP(ingresos)}\n`;
-  msg += `❤️ Gastos:   ${formatCLP(gastos)}\n`;
-  msg += `${balance >= 0 ? '✅' : '⚠️'} Balance:  ${formatCLP(balance)}\n`;
-
-  if (Object.keys(gastosCat).length > 0) {
-    msg += `\n*Gastos por categoría:*\n`;
-    Object.entries(gastosCat)
-      .sort((a, b) => b[1] - a[1])
-      .forEach(([cat, total]) => {
-        msg += `${CATEGORY_EMOJIS[cat] || '📦'} ${cat}: ${formatCLP(total)}\n`;
-      });
-  }
-  return msg;
+  return {
+    es_comando: false,
+    tipo,
+    monto,
+    categoria,
+    descripcion,
+    fecha,
+  };
 }
 
-async function handlePresupuesto(phone, monthYear) {
-  const [budgets, transactions] = await Promise.all([
-    getBudgets(phone, monthYear),
-    getTransactions(phone, monthYear)
-  ]);
-
-  if (budgets.length === 0) {
-    return '📋 No tienes presupuestos configurados. Configúralos desde el dashboard web.';
-  }
-
-  const gastosCat = {};
-  transactions.filter(t => t.type === 'gasto').forEach(t => {
-    gastosCat[t.category] = (gastosCat[t.category] || 0) + t.amount;
-  });
-
-  let msg = `📋 *Presupuesto ${monthYear}*\n\n`;
-  budgets.forEach(b => {
-    const gastado = gastosCat[b.category] || 0;
-    const pct = Math.round((gastado / b.monthly_limit) * 100);
-    const emoji = pct < 80 ? '✅' : pct < 100 ? '⚠️' : '🚨';
-    msg += `${emoji} ${CATEGORY_EMOJIS[b.category] || '📦'} ${b.category}\n`;
-    msg += `   ${formatCLP(gastado)} / ${formatCLP(b.monthly_limit)} (${pct}%)\n`;
-  });
-  return msg;
-}
-
-async function handleHistorial(phone) {
-  const transactions = await getTransactions(phone, null, 10);
-  if (transactions.length === 0) return '📝 No hay transacciones registradas.';
-
-  let msg = `📝 *Últimas ${transactions.length} transacciones*\n\n`;
-  transactions.forEach(t => {
-    const emoji = t.type === 'ingreso' ? '💚' : '❤️';
-    msg += `${emoji} ${t.transaction_date} — ${t.description}: ${formatCLP(t.amount)}\n`;
-  });
-  return msg;
-}
-
-function getAyuda() {
-  return `🤖 *Contabilidad Familiar*\n\n` +
-    `*Registrar transacciones:*\n` +
-    `• "pagué 5000 de almuerzo"\n` +
-    `• "gasté 45.000 en supermercado"\n` +
-    `• "recibí sueldo 1.200.000"\n` +
-    `• "bencina 18000"\n\n` +
-    `*Consultas:*\n` +
-    `• "resumen" — resumen del mes actual\n` +
-    `• "resumen junio" — resumen de un mes\n` +
-    `• "presupuesto" — presupuesto vs real\n` +
-    `• "historial" — últimas 10 transacciones\n\n` +
-    `*Editar:*\n` +
-    `• "borrar último" — elimina última transacción\n\n` +
-    `💻 Dashboard web disponible en la URL del servidor.`;
-}
-
-async function handleBorrar(phone) {
-  const last = await getLastTransaction(phone);
-  if (!last) return '❌ No hay transacciones para eliminar.';
-  await deleteTransaction(last.id);
-  return `🗑️ Eliminado: ${last.description} — ${formatCLP(last.amount)} (${last.transaction_date})`;
-}
-
-module.exports = router;
+module.exports = { classifyMessage };
