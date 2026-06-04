@@ -3,7 +3,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 async function classifyMessage(message, currentDate) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
   const prompt = `Eres un asistente de contabilidad personal chilena. Analiza este mensaje y responde ÚNICAMENTE con JSON válido, sin markdown, sin bloques de código, sin texto adicional.
 
