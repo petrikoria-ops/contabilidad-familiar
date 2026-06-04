@@ -15,7 +15,8 @@
     "@supabase/supabase-js": "^2.49.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "twilio": "^5.4.0"
+    "twilio": "^5.4.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
